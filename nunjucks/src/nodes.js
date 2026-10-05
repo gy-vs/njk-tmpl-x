@@ -109,6 +109,7 @@ const TemplateRef = Node.extend('TemplateRef', { fields: ['template'] });
 const Extends = TemplateRef.extend('Extends');
 const Include = Node.extend('Include', { fields: ['template', 'ignoreMissing'] });
 const Set = Node.extend('Set', { fields: ['targets', 'value'] });
+const With = Node.extend('With', { fields: ['targets', 'values', 'body', 'asyncValues'] });
 const Switch = Node.extend('Switch', { fields: ['expr', 'cases', 'default'] });
 const Case = Node.extend('Case', { fields: ['cond', 'body'] });
 const Output = NodeList.extend('Output');
@@ -241,6 +242,7 @@ module.exports = {
   Extends: Extends,
   Include: Include,
   Set: Set,
+  With: With,
   Switch: Switch,
   Case: Case,
   LookupVal: LookupVal,

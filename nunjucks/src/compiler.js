@@ -529,7 +529,15 @@ class Compiler extends Obj {
     // new ones if necessary
     node.targets.forEach((target) => {
       var name = target.value;
-      var id = frame.lookup(name);
+      var id = null;
+
+      // Writes stay inside the nearest write-isolating frame (such
+      // as one introduced by `with`), mirroring the run-time
+      // resolution in frame.set(..., true).
+      var scopeFrame = frame.resolve ? frame.resolve(name, true) : null;
+      if (scopeFrame) {
+        id = scopeFrame.get(name);
+      }
 
       if (id === null || id === undefined) {
         id = this._tmpid();
@@ -570,6 +578,84 @@ class Compiler extends Obj {
         this._emitLine('}');
       }
     });
+  }
+
+  compileWith(node, frame) {
+    const asyncSymbols = {};
+    node.asyncValues.forEach((asyncNode) => {
+      asyncSymbols[asyncNode.symbol.value] = true;
+    });
+
+    // Evaluate synchronous assignment expressions in the enclosing
+    // scope before the new frame is introduced. Assignments whose
+    // value is an async filter have been lifted to `asyncValues`
+    // (their values are the filter callbacks' result symbols).
+    const ids = node.targets.map((target, i) => {
+      const value = node.values[i];
+      if (value instanceof nodes.Symbol && asyncSymbols[value.value]) {
+        // The value is provided by a hoisted async filter.
+        return value.value;
+      }
+
+      const id = this._tmpid();
+      this._emit(`var ${id} = `);
+      this._compileExpression(value, frame);
+      this._emitLine(';');
+      return id;
+    });
+
+    // The block body is wrapped in nested callbacks (one for the
+    // block itself, plus one per async filter used by an assignment
+    // expression) so the frame is only popped once every
+    // right-hand side has been evaluated and any asynchronous
+    // content in the body has finished.
+    this._emitLine('(function(cb) {');
+
+    node.asyncValues.forEach((asyncNode) => {
+      const symbol = asyncNode.symbol.value;
+
+      this._emit('env.getFilter("');
+      this.assertType(asyncNode.name, nodes.Symbol);
+      this._emit(asyncNode.name.value + '").call(context, ');
+      this._compileAggregate(asyncNode.args, frame);
+      this._emitLine(', ' + this._makeCallback(symbol));
+    });
+
+    frame = frame.push(true);
+    this._emitLine('frame = frame.push(true);');
+
+    node.targets.forEach((target, i) => {
+      const id = ids[i];
+      frame.set(target.value, id);
+      this._emitLine(`frame.set("${target.value}", ${id});`);
+    });
+
+    // The hoisted async result symbols are parameters of the filter
+    // callbacks (plain JS variables), so register them on the
+    // compile-time frame like other async filter results. They only
+    // exist inside this scope.
+    node.asyncValues.forEach((asyncNode) => {
+      frame.set(asyncNode.symbol.value, asyncNode.symbol.value);
+    });
+
+    // Compile the body but keep its scope closers (from async
+    // filters, includes, ...) buffered: the frame pop and the
+    // continuation must run inside them.
+    const bodyClosersBefore = this._scopeClosers;
+    this._scopeClosers = '';
+    this.compile(node.body, frame);
+    const bodyClosers = this._scopeClosers;
+    this._scopeClosers = bodyClosersBefore;
+
+    this._emitLine('frame = frame.pop();');
+
+    // Close the body's asynchronous scopes and the filter callbacks
+    // (innermost-first), then the wrapper function, invoking it with
+    // the continuation.
+    this._emitLine('cb();' + bodyClosers.replace(/;$/, '') +
+      '})'.repeat(node.asyncValues.length + 1) +
+      '(' + this._makeCallback());
+    this._addScopeLevel();
   }
 
   compileSwitch(node, frame) {

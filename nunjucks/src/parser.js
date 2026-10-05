@@ -524,6 +524,61 @@ class Parser extends Obj {
     return node;
   }
 
+  parseWith() {
+    const tag = this.peekToken();
+    if (!this.skipSymbol('with')) {
+      this.fail('parseWith: expected with', tag.lineno, tag.colno);
+    }
+
+    const node = new nodes.With(tag.lineno, tag.colno, [], [], null, []);
+
+    // An empty {% with %} with no assignments is valid; it only
+    // introduces a new scope.
+    if (this.peekToken().type !== lexer.TOKEN_BLOCK_END) {
+      while (1) { // eslint-disable-line no-constant-condition
+        const target = this.parsePrimary();
+        if (!(target instanceof nodes.Symbol)) {
+          this.fail('parseWith: variable name expected',
+            target.lineno,
+            target.colno);
+        }
+        node.targets.push(target);
+
+        if (!this.skipValue(lexer.TOKEN_OPERATOR, '=')) {
+          this.fail('parseWith: expected = after variable name',
+            tag.lineno,
+            tag.colno);
+        }
+
+        node.values.push(this.parseExpression());
+
+        if (!this.skip(lexer.TOKEN_COMMA)) {
+          break;
+        }
+      }
+    }
+
+    this.advanceAfterBlockEnd(tag.value);
+    node.body = this.parseUntilBlocks('endwith');
+
+    if (!this.skipSymbol('endwith')) {
+      this.fail('parseWith: expected endwith, got end of file',
+        tag.lineno,
+        tag.colno);
+    }
+
+    const endTok = this.peekToken();
+    if (!endTok) {
+      this.fail('parseWith: expected endwith, got end of file',
+        tag.lineno,
+        tag.colno);
+    }
+
+    this.advanceAfterBlockEnd(endTok.value);
+
+    return node;
+  }
+
   parseSwitch() {
     /*
      * Store the tag names in variables in case someone ever wants to
@@ -625,6 +680,8 @@ class Parser extends Obj {
         return this.parseInclude();
       case 'set':
         return this.parseSet();
+      case 'with':
+        return this.parseWith();
       case 'macro':
         return this.parseMacro();
       case 'call':

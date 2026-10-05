@@ -1671,6 +1671,187 @@
       finish(done);
     });
 
+    describe('the with tag', function() {
+      it('should bind names only for the duration of the block', function() {
+        equal('{% with a = 1 %}{{ a }}{% endwith %}[{{ a }}]', '1[]');
+      });
+
+      it('should allow several comma-separated assignments', function() {
+        equal('{% with a = 1, b = 2, c = 3 %}{{ a }}{{ b }}{{ c }}' +
+          '{% endwith %}',
+        '123');
+      });
+
+      it('should evaluate all right-hand sides in the enclosing scope',
+        function() {
+          equal('{% set a = 5 %}' +
+            '{% with a = 1, b = a %}{{ a }}{{ b }}{% endwith %}{{ a }}',
+          '155');
+        });
+
+      it('should allow an empty with tag as a bare scope', function() {
+        equal('{% set n = 0 %}' +
+          '{% with %}{% set n = 9 %}{{ n }}{% endwith %}{{ n }}',
+        '90');
+      });
+
+      it('should not leak a set inside nested control structures',
+        function() {
+          equal('{% set n = 0 %}' +
+            '{% with %}{% if true %}{% set n = 9 %}{{ n }}' +
+            '{% endif %}{% endwith %}{{ n }}',
+          '90');
+        });
+
+      it('should be nestable', function() {
+        equal('{% with a = 1 %}' +
+          '{% with a = 2, b = a %}{{ a }}{{ b }}{% endwith %}' +
+          '{{ a }}{% endwith %}',
+        '211');
+      });
+
+      it('should see variables from enclosing scopes', function() {
+        equal('{% for i in [1, 2] %}' +
+          '{% with d = i * 10 %}{{ d }}{% endwith %}{% endfor %}',
+        '1020');
+      });
+
+      it('should restore outer variables shadowed in a for loop',
+        function() {
+          equal('{% set i = 99 %}' +
+            '{% for i in [1] %}{% with d = i %}{{ d }}{% endwith %}' +
+            '{% endfor %}{{ i }}',
+          '199');
+        });
+
+      it('should expose its names to included templates', function() {
+        equal('{% with item = "seen" %}{% include "item.njk" %}' +
+          '{% endwith %}',
+        'showing seen');
+      });
+
+      it('should keep macros defined inside the block local', function() {
+        equal('{% with %}' +
+          '{% macro greet(name) %}hi {{ name }}{% endmacro %}' +
+          '{{ greet("x") }}{% endwith %}[{{ greet is defined }}]',
+        'hi x[false]');
+      });
+
+      it('should work inside a macro', function() {
+        equal('{% macro m() %}{% with a = 3 %}{{ a }}{% endwith %}' +
+          '{% endmacro %}{{ m() }}[{{ a }}]',
+        '3[]');
+      });
+
+      it('should keep block-set captures local to the block', function() {
+        equal('{% with %}{% set captured %}CAP{% endset %}' +
+          '[{{ captured }}]{% endwith %}[{{ captured is defined }}]',
+        '[CAP][false]');
+      });
+
+      it('should support whitespace controls', function() {
+        equal('a{%- with x = 1 %}  {{ x }}  {%- endwith %}b',
+        'a  1b');
+      });
+
+      it('should produce identical output when rendered asynchronously',
+        function(done) {
+          var opts = {
+            asyncFilters: {
+              asyncDouble: function(n, cb) {
+                setImmediate(function() { cb(null, n * 2); });
+              }
+            }
+          };
+
+          render('{% set a = 5 %}' +
+            '{% with a = 1, b = a | asyncDouble %}{{ a }}{{ b }}' +
+            '{% endwith %}{{ a }}',
+          {},
+          opts,
+          function(err, res) {
+            expect(res).to.be('1105');
+          });
+
+          render('{% for i in [1, 2] %}' +
+            '{% with d = i | asyncDouble %}{{ d }}{% endwith %}' +
+            '{% endfor %}',
+          {},
+          opts,
+          function(err, res) {
+            expect(res).to.be('24');
+          });
+
+          finish(done);
+        });
+
+      it('should support async filters in the body when rendered async',
+        function(done) {
+          var opts = {
+            asyncFilters: {
+              asyncUpper: function(str, cb) {
+                setImmediate(function() { cb(null, str.toUpperCase()); });
+              }
+            }
+          };
+
+          render('{% with x = 1 %}{{ "hi" | asyncUpper }}{{ x }}' +
+            '{% endwith %}DONE',
+          {},
+          opts,
+          function(err, res) {
+            expect(res).to.be('HI1DONE');
+          });
+
+          render('{% with %}{{ "hi" | asyncUpper }}{% endwith %}DONE',
+          {},
+          opts,
+          function(err, res) {
+            expect(res).to.be('HIDONE');
+          });
+
+          finish(done);
+        });
+
+      it('should support includes in the block when rendered async',
+        function(done) {
+          render('{% with item = "seen" %}{% include "item.njk" %}' +
+            '{% endwith %}DONE',
+          {},
+          {},
+          function(err, res) {
+            expect(res).to.be('showing seenDONE');
+          });
+
+          finish(done);
+        });
+
+      it('should give a syntax error when the "=" is missing', function() {
+        var templateRender = function() {
+          render('line1\n{% with a %}{{ a }}{% endwith %}');
+        };
+        expect(templateRender).to
+          .throwException(/Line 2[\s\S]*expected = after variable name/);
+      });
+
+      it('should give a syntax error when the block is not closed',
+        function() {
+          var templateRender = function() {
+            render('line1\nline2\n{% with a = 1 %}{{ a }}');
+          };
+          expect(templateRender).to
+            .throwException(/Line 3[\s\S]*expected endwith/);
+        });
+
+      it('should reject non-name assignment targets', function() {
+        var templateRender = function() {
+          render('{% with 1 = 2 %}{% endwith %}');
+        };
+        expect(templateRender).to
+          .throwException(/variable name expected/);
+      });
+    });
+
     it('should throw errors', function(done) {
       render('{% from "import.njk" import boozle %}',
         {},

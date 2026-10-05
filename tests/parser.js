@@ -369,6 +369,33 @@
                 [nodes.TemplateData, 'empty']]]]]);
     });
 
+    it('should parse with blocks', function() {
+      var n = parser.parse('{% with a = 1 %}{{ a }}{% endwith %}');
+      expect(n.children[0].typename).to.be('With');
+      var withNode = n.children[0];
+      expect(withNode.targets.length).to.be(1);
+      expect(withNode.values.length).to.be(1);
+      expect(withNode.targets[0]).to.be.an(nodes.Symbol);
+      expect(withNode.targets[0].value).to.be('a');
+      expect(withNode.values[0]).to.be.an(nodes.Literal);
+      expect(withNode.values[0].value).to.be(1);
+      expect(withNode.body).to.be.an(nodes.NodeList);
+      expect(withNode.asyncValues).to.eql([]);
+
+      n = parser.parse('{% with a = 1, b = a %}{{ a }}{% endwith %}');
+      withNode = n.children[0];
+      expect(withNode.targets.map(function(s) { return s.value; }))
+        .to.eql(['a', 'b']);
+      expect(withNode.values[0]).to.be.an(nodes.Literal);
+      expect(withNode.values[1]).to.be.an(nodes.Symbol);
+      expect(withNode.values[1].value).to.be('a');
+
+      n = parser.parse('{% with %}{{ 1 }}{% endwith %}');
+      withNode = n.children[0];
+      expect(withNode.targets).to.eql([]);
+      expect(withNode.values).to.eql([]);
+    });
+
     it('should parse filters', function() {
       isAST(parser.parse('{{ foo | bar }}'),
         [nodes.Root,

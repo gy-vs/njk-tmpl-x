@@ -119,6 +119,36 @@ function liftFilters(ast, asyncFilters) {
       return _liftFilters(node, asyncFilters);
     } else if (node instanceof nodes.Set) {
       return _liftFilters(node, asyncFilters, 'value');
+    } else if (node instanceof nodes.With) {
+      // Lift async filters out of the assignment expressions. Each
+      // lifted filter is hoisted to run before the block is entered,
+      // while the value it produced is bound to a name local to the
+      // new scope.
+      const asyncValues = (node.asyncValues || []).slice();
+
+      const values = mapCOW(node.values, (child) => {
+        const lifted = _liftFilters(child, asyncFilters);
+        if (lifted !== child) {
+          lifted.children.forEach((n) => {
+            if (n instanceof nodes.FilterAsync) {
+              asyncValues.push(n);
+            }
+          });
+          return lifted.children[lifted.children.length - 1];
+        }
+        return child;
+      });
+
+      if (values !== node.values || asyncValues.length !== (node.asyncValues || []).length) {
+        return new nodes.With(node.lineno,
+          node.colno,
+          node.targets,
+          values,
+          node.body,
+          asyncValues);
+      }
+
+      return undefined;
     } else if (node instanceof nodes.For) {
       return _liftFilters(node, asyncFilters, 'arr');
     } else if (node instanceof nodes.If) {
@@ -167,7 +197,9 @@ function convertStatements(ast) {
         child instanceof nodes.IfAsync ||
         child instanceof nodes.AsyncEach ||
         child instanceof nodes.AsyncAll ||
-        child instanceof nodes.CallExtensionAsync) {
+        child instanceof nodes.CallExtensionAsync ||
+        // async filters lifted out of a `with` tag's assignments
+        (child instanceof nodes.With && child.asyncValues.length)) {
         async = true;
         // Stop iterating by returning the node
         return child;
