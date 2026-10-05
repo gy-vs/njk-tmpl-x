@@ -369,6 +369,32 @@
                 [nodes.TemplateData, 'empty']]]]]);
     });
 
+    it('should parse with blocks', function() {
+      isAST(parser.parse('{% with a = 1, b = 2 %}{{ a }}{{ b }}{% endwith %}'),
+        [nodes.Root,
+          [nodes.With,
+            [nodes.NodeList,
+              [nodes.Symbol, 'a'],
+              [nodes.Symbol, 'b']],
+            [nodes.NodeList,
+              [nodes.Literal, 1],
+              [nodes.Literal, 2]],
+            [nodes.NodeList,
+              [nodes.Output,
+                [nodes.Symbol, 'a']],
+              [nodes.Output,
+                [nodes.Symbol, 'b']]]]]);
+
+      isAST(parser.parse('{% with %}x{% endwith %}'),
+        [nodes.Root,
+          [nodes.With,
+            [nodes.NodeList],
+            [nodes.NodeList],
+            [nodes.NodeList,
+              [nodes.Output,
+                [nodes.TemplateData, 'x']]]]]);
+    });
+
     it('should parse filters', function() {
       isAST(parser.parse('{{ foo | bar }}'),
         [nodes.Root,
@@ -857,6 +883,18 @@
       expect(function() {
         parser.parse('{% from "foo" import _bar %}');
       }).to.throwException(/names starting with an underscore cannot be imported/);
+
+      expect(function() {
+        parser.parse('{% with a %}{% endwith %}');
+      }).to.throwException(/expected =/);
+
+      expect(function() {
+        parser.parse('{% with a = 1 %}');
+      }).to.throwException(/expected endwith/);
+
+      expect(function() {
+        parser.parse('{% with a.b = 1 %}{% endwith %}');
+      }).to.throwException(/variable name expected/);
     });
 
     it('should parse custom tags', function() {

@@ -537,6 +537,143 @@
       finish(done);
     });
 
+    it('should compile with blocks', function(done) {
+      equal('{% with a = 1 %}{{ a }}{% endwith %}', '1');
+      equal('{% with a = 1, b = 2 %}{{ a }}{{ b }}{% endwith %}', '12');
+      equal('{% with %}{% endwith %}', '');
+      finish(done);
+    });
+
+    it('should not leak with block variables to the outer scope', function(done) {
+      equal('{% with a = 1 %}{{ a }}{% endwith %}[{{ a }}]', '1[]');
+      finish(done);
+    });
+
+    it('should evaluate with assignments in the enclosing scope', function(done) {
+      equal('{% set a = 5 %}{% with a = 1, b = a %}{{ a }}{{ b }}{% endwith %}{{ a }}',
+        '155');
+      finish(done);
+    });
+
+    it('should keep sets inside with blocks local to the block', function(done) {
+      equal('{% set n = 0 %}{% with %}{% set n = 9 %}{{ n }}{% endwith %}{{ n }}',
+        '90');
+      equal('{% with a = 1 %}{% set a = 2 %}{{ a }}{% endwith %}{{ a }}', '2');
+      finish(done);
+    });
+
+    it('should not clobber outer variables set inside with blocks', function(done) {
+      equal('{% for n in [1] %}{% with %}{% set n = 9 %}{{ n }}{% endwith %}{{ n }}{% endfor %}',
+        '91');
+      equal('{% macro m(n) %}{% with %}{% set n = 9 %}{{ n }}{% endwith %}{{ n }}{% endmacro %}{{ m(1) }}',
+        '91');
+      finish(done);
+    });
+
+    it('should nest with blocks', function(done) {
+      equal('{% with a = 1 %}{% with a = 2 %}{{ a }}{% endwith %}{{ a }}{% endwith %}',
+        '21');
+      equal('{% with a = 1 %}{% with b = 2 %}{{ a }}{{ b }}{% endwith %}{{ a }}{% endwith %}',
+        '121');
+      finish(done);
+    });
+
+    it('should read outer variables inside with blocks', function(done) {
+      equal('{% set x = 7 %}{% with %}{{ x }}{% endwith %}', '7');
+      equal('{% for i in [1, 2] %}{% with d = i * 10 %}{{ d }}{% endwith %}{% endfor %}',
+        '1020');
+      finish(done);
+    });
+
+    it('should allow with blocks in macros and blocks', function(done) {
+      equal('{% macro m(v) %}{% with w = v + 1 %}{{ w }}{% endwith %}{% endmacro %}{{ m(1) }}',
+        '2');
+      equal('{% block b %}{% with a = 1 %}{{ a }}{% endwith %}{% endblock %}', '1');
+      finish(done);
+    });
+
+    it('should define macros inside with blocks', function(done) {
+      equal('{% with %}{% macro m() %}hi{% endmacro %}{{ m() }}{% endwith %}', 'hi');
+      finish(done);
+    });
+
+    it('should see with block variables in included templates', function(done) {
+      equal('{% set var = 0 %}{% with var = 5 %}{% include "include-set.njk" %}{% endwith %}{{ var }}',
+        '52\n0');
+      finish(done);
+    });
+
+    it('should compile with blocks with async filters', function(done) {
+      var opts;
+      if (!fs) {
+        this.skip();
+      } else {
+        opts = {
+          asyncFilters: {
+            getContents: function(tmpl, cb) {
+              fs.readFile(tmpl, cb);
+            }
+          }
+        };
+
+        render('{% with a = tmpl | getContents %}{{ a }}{% endwith %}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('somecontenthere');
+          });
+
+        render('{% with a = 1 %}{{ tmpl | getContents }}{{ a }}{% endwith %}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('somecontenthere1');
+          });
+
+        render('{% set a = 5 %}{% with a = tmpl | getContents, b = a %}{{ a }}{{ b }}{% endwith %}{{ a }}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('somecontenthere55');
+          });
+
+        render('{% for t in [tmpl, tmpl] %}{% with c = t | getContents %}{{ c }}{% endwith %}*{% endfor %}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('somecontenthere*somecontenthere*');
+          });
+
+        render('{% with %}{% include "async.njk" %}{% endwith %}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('somecontenthere\n');
+          });
+
+        render('{% with a = 1 %}{% with b = tmpl | getContents %}{{ a }}{{ b }}{% endwith %}{% endwith %}',
+          {
+            tmpl: 'tests/templates/for-async-content.njk'
+          },
+          opts,
+          function(err, res) {
+            expect(res).to.be('1somecontenthere');
+          });
+
+        finish(done);
+      }
+    });
+
     it('should compile async control', function(done) {
       var opts;
       if (!fs) {

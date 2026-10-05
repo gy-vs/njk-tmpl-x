@@ -530,13 +530,32 @@ class Compiler extends Obj {
     node.targets.forEach((target) => {
       var name = target.value;
       var id = frame.lookup(name);
+      var withFrame = null;
 
-      if (id === null || id === undefined) {
+      // A `with` block is a hard scope boundary for writes: reusing a
+      // variable slot declared outside of it would clobber the outer
+      // variable. Find the innermost `with` scope between this set
+      // and the frame that owns the slot, if there is one.
+      for (var f = frame; f && f.variables[name] === undefined; f = f.parent) {
+        if (f.withScope) {
+          withFrame = f;
+          break;
+        }
+      }
+
+      if (withFrame || id === null || id === undefined) {
         id = this._tmpid();
 
         // Note: This relies on js allowing scope across
         // blocks, in case this is created inside an `if`
         this._emitLine('var ' + id + ';');
+
+        if (withFrame) {
+          // Record the slot in the `with` scope so that reads (and
+          // later sets) inside the block use it instead of the outer
+          // variable.
+          withFrame.set(name, id);
+        }
       }
 
       ids.push(id);
@@ -570,6 +589,50 @@ class Compiler extends Obj {
         this._emitLine('}');
       }
     });
+  }
+
+  compileWith(node, frame) {
+    // A `with` block opens a new scope. All of the assigned
+    // expressions are evaluated in the enclosing scope before any of
+    // the new names are bound, so in `{% with a = 1, b = a %}` the
+    // `a` on the right-hand side still refers to the outer `a`.
+    const ids = node.targets.children.map((target, i) => {
+      const id = this._tmpid();
+
+      this._emit(`var ${id} = `);
+      this._compileExpression(node.values.children[i], frame);
+      this._emitLine(';');
+
+      return {name: target.value, id: id};
+    });
+
+    // Reads inside the body see the enclosing scope, but writes must
+    // not escape the block: the runtime frame isolates them, and
+    // `withScope` tells compileSet not to reuse variable slots
+    // declared outside of the block.
+    const withFrame = frame.push();
+    withFrame.withScope = true;
+
+    // The body is wrapped in a callback so that the scope is only
+    // popped after everything inside the block (includes, async
+    // filters, ...) has completed, whether that happens
+    // synchronously or not.
+    this._emit('(function(cb) {');
+    this._emitLine('frame = frame.push(true);');
+
+    ids.forEach((sym) => {
+      withFrame.set(sym.name, sym.id);
+      this._emitLine(`frame.set("${sym.name}", ${sym.id});`);
+    });
+
+    this._withScopedSyntax(() => {
+      this.compile(node.body, withFrame);
+      this._emit('cb()');
+    });
+
+    this._emit('})(' + this._makeCallback());
+    this._addScopeLevel();
+    this._emitLine('frame = frame.pop();');
   }
 
   compileSwitch(node, frame) {

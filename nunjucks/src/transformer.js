@@ -119,6 +119,8 @@ function liftFilters(ast, asyncFilters) {
       return _liftFilters(node, asyncFilters);
     } else if (node instanceof nodes.Set) {
       return _liftFilters(node, asyncFilters, 'value');
+    } else if (node instanceof nodes.With) {
+      return _liftFilters(node, asyncFilters, 'values');
     } else if (node instanceof nodes.For) {
       return _liftFilters(node, asyncFilters, 'arr');
     } else if (node instanceof nodes.If) {

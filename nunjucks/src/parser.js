@@ -524,6 +524,51 @@ class Parser extends Obj {
     return node;
   }
 
+  parseWith() {
+    const tag = this.peekToken();
+    if (!this.skipSymbol('with')) {
+      this.fail('parseWith: expected with', tag.lineno, tag.colno);
+    }
+
+    const node = new nodes.With(tag.lineno, tag.colno);
+    node.targets = new nodes.NodeList(tag.lineno, tag.colno);
+    node.values = new nodes.NodeList(tag.lineno, tag.colno);
+
+    // `{% with %}` without any assignments simply opens a new scope
+    if (this.peekToken().type !== lexer.TOKEN_BLOCK_END) {
+      do {
+        const target = this.parsePrimary();
+
+        if (!(target instanceof nodes.Symbol)) {
+          this.fail('parseWith: variable name expected in with tag',
+            target.lineno,
+            target.colno);
+        }
+
+        if (!this.skipValue(lexer.TOKEN_OPERATOR, '=')) {
+          this.fail('parseWith: expected = in with tag');
+        }
+
+        node.targets.addChild(target);
+        node.values.addChild(this.parseExpression());
+      } while (this.skip(lexer.TOKEN_COMMA));
+    }
+
+    this.advanceAfterBlockEnd(tag.value);
+
+    node.body = this.parseUntilBlocks('endwith');
+
+    if (!this.peekToken()) {
+      this.fail('parseWith: expected endwith, got end of file',
+        tag.lineno,
+        tag.colno);
+    }
+
+    this.advanceAfterBlockEnd();
+
+    return node;
+  }
+
   parseSwitch() {
     /*
      * Store the tag names in variables in case someone ever wants to
@@ -625,6 +670,8 @@ class Parser extends Obj {
         return this.parseInclude();
       case 'set':
         return this.parseSet();
+      case 'with':
+        return this.parseWith();
       case 'macro':
         return this.parseMacro();
       case 'call':
